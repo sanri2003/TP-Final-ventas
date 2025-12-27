@@ -8,6 +8,9 @@ import streamlit as st
 import pandas as pd
 import altair as alt
 
+alt.data_transformers.disable_max_rows()
+
+
 
 # ===============================
 # CONFIGURACIÓN GENERAL
