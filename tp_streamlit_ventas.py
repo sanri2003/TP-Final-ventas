@@ -8,8 +8,8 @@ import streamlit as st
 import pandas as pd
 import altair as alt
 
+# IMPORTANTE para Streamlit Cloud (evita crasheos por límite de filas de Altair)
 alt.data_transformers.disable_max_rows()
-
 
 
 # ===============================
@@ -48,10 +48,10 @@ def load_data():
 
     # Asegurar columnas temporales
     if "date" in df.columns:
-        df["date"] = pd.to_datetime(df["date"])
+        df["date"] = pd.to_datetime(df["date"], errors="coerce")
         df["year"] = df["date"].dt.year
         df["month"] = df["date"].dt.month
-        df["week"] = df["date"].dt.isocalendar().week.astype(int)
+        df["week"] = df["date"].dt.isocalendar().week.astype("Int64")
         df["day_of_week"] = df["date"].dt.day_name()
 
     return df
@@ -83,12 +83,12 @@ if seccion == "Visión global":
         "junto con rankings de ventas y patrones de estacionalidad."
     )
 
-    # a) Conteo general (KPIs)
+    # a) Conteo general
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Número total de tiendas", df["store_nbr"].nunique())
-    col2.metric("Número total de productos que se venden", df["family"].nunique())
-    col3.metric("Estados en los que está la empresa", df["state"].nunique())
-    col4.metric("Meses con datos", df["month"].nunique())
+    col1.metric("Número total de tiendas", int(df["store_nbr"].nunique()))
+    col2.metric("Número total de productos que se venden", int(df["family"].nunique()))
+    col3.metric("Estados en los que está la empresa", int(df["state"].nunique()))
+    col4.metric("Meses con datos", int(df["month"].nunique()))
 
     st.divider()
 
@@ -97,13 +97,12 @@ if seccion == "Visión global":
 
     c1, c2 = st.columns(2)
 
-    # b.i Ranking (top 10) de productos más vendidos
+    # b.i Top 10 productos por ventas
     ventas_por_producto = (
-        df.groupby("family")["sales"]
+        df.groupby("family", as_index=False)["sales"]
         .sum()
-        .sort_values(ascending=False)
+        .sort_values("sales", ascending=False)
         .head(10)
-        .reset_index()
     )
     ventas_por_producto.columns = ["Producto", "Ventas"]
 
@@ -119,12 +118,11 @@ if seccion == "Visión global":
         )
         st.altair_chart(chart_prod, use_container_width=True)
 
-    # b.ii Distribución de ventas por tiendas
+    # b.ii Distribución de ventas por tienda
     ventas_por_tienda = (
-        df.groupby("store_nbr")["sales"]
+        df.groupby("store_nbr", as_index=False)["sales"]
         .sum()
-        .sort_values(ascending=False)
-        .reset_index()
+        .sort_values("sales", ascending=False)
     )
     ventas_por_tienda.columns = ["Tienda", "Ventas"]
 
@@ -142,16 +140,15 @@ if seccion == "Visión global":
 
     st.divider()
 
-    # b.iii Ranking (Top 10) de tiendas con ventas en productos en promoción
+    # b.iii Top 10 tiendas con ventas en productos en promoción
     st.subheader("Ranking (Top 10) de tiendas con ventas en productos en promoción")
 
     df_promo = df[df["onpromotion"] > 0].copy()
     top_tiendas_promo = (
-        df_promo.groupby("store_nbr")["sales"]
+        df_promo.groupby("store_nbr", as_index=False)["sales"]
         .sum()
-        .sort_values(ascending=False)
+        .sort_values("sales", ascending=False)
         .head(10)
-        .reset_index()
     )
     top_tiendas_promo.columns = ["Tienda", "Ventas_en_promoción"]
 
@@ -167,14 +164,10 @@ if seccion == "Visión global":
 
     st.divider()
 
-    # c) Estacionalidad
+    # c) Estacionalidad de las ventas
     st.subheader("Análisis de la estacionalidad de las ventas")
 
-    # Orden correcto de días (inglés) para que queden en orden y no alfabético
     orden_dias = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-    df["day_of_week"] = pd.Categorical(df["day_of_week"], categories=orden_dias, ordered=True)
-
-    # Map a español (para mostrar)
     dias_es = {
         "Monday": "Lunes",
         "Tuesday": "Martes",
@@ -185,14 +178,17 @@ if seccion == "Visión global":
         "Sunday": "Domingo"
     }
 
-    est1, est2, est3 = st.columns(3)
+    df_est = df.copy()
+    df_est["day_of_week"] = pd.Categorical(df_est["day_of_week"], categories=orden_dias, ordered=True)
 
-    # c.i Día con más ventas (por término medio)
-    ventas_dia = df.groupby("day_of_week")["sales"].mean().sort_index().reset_index()
+    e1, e2, e3 = st.columns(3)
+
+    # c.i Ventas medias por día de semana
+    ventas_dia = df_est.groupby("day_of_week", as_index=False)["sales"].mean()
     ventas_dia["Día"] = ventas_dia["day_of_week"].map(dias_es)
-    ventas_dia.columns = ["day_of_week", "Ventas_medias", "Día"]
+    ventas_dia.rename(columns={"sales": "Ventas_medias"}, inplace=True)
 
-    with est1:
+    with e1:
         st.write("Ventas medias por día de la semana")
         chart_dia = (
             alt.Chart(ventas_dia)
@@ -204,11 +200,16 @@ if seccion == "Visión global":
         )
         st.altair_chart(chart_dia, use_container_width=True)
 
-    # c.ii Volumen medio por semana del año
-    ventas_semana = df.groupby("week")["sales"].mean().sort_index().reset_index()
-    ventas_semana.columns = ["Semana", "Ventas_medias"]
+    # c.ii Ventas medias por semana del año
+    ventas_semana = (
+        df_est.dropna(subset=["week"])
+        .groupby("week", as_index=False)["sales"]
+        .mean()
+        .sort_values("week")
+    )
+    ventas_semana.rename(columns={"week": "Semana", "sales": "Ventas_medias"}, inplace=True)
 
-    with est2:
+    with e2:
         st.write("Volumen de ventas medio por semana del año")
         chart_semana = (
             alt.Chart(ventas_semana)
@@ -220,11 +221,16 @@ if seccion == "Visión global":
         )
         st.altair_chart(chart_semana, use_container_width=True)
 
-    # c.iii Volumen medio por mes
-    ventas_mes = df.groupby("month")["sales"].mean().sort_index().reset_index()
-    ventas_mes.columns = ["Mes", "Ventas_medias"]
+    # c.iii Ventas medias por mes
+    ventas_mes = (
+        df_est.dropna(subset=["month"])
+        .groupby("month", as_index=False)["sales"]
+        .mean()
+        .sort_values("month")
+    )
+    ventas_mes.rename(columns={"month": "Mes", "sales": "Ventas_medias"}, inplace=True)
 
-    with est3:
+    with e3:
         st.write("Volumen de ventas medio por mes")
         chart_mes = (
             alt.Chart(ventas_mes)
@@ -246,15 +252,23 @@ elif seccion == "Por tienda":
 
     tienda = st.selectbox(
         "Selecciona una tienda",
-        sorted(df["store_nbr"].unique())
+        sorted(df["store_nbr"].dropna().unique())
     )
 
     df_tienda = df[df["store_nbr"] == tienda].copy()
 
-    # b) Total productos vendidos (sales)
+    # Limpieza defensiva (por si alguna tienda trae valores raros)
+    for col in ["sales", "onpromotion", "year"]:
+        if col in df_tienda.columns:
+            df_tienda[col] = pd.to_numeric(df_tienda[col], errors="coerce")
+
+    df_tienda = df_tienda.dropna(subset=["sales", "year"])
+    df_tienda = df_tienda[~df_tienda["sales"].isin([float("inf"), float("-inf")])]
+
+    # b) Total de productos vendidos (sales = unidades vendidas)
     total_productos_vendidos = df_tienda["sales"].sum()
 
-    # c) Total productos vendidos en promoción
+    # c) Total de productos vendidos que estaban en promoción
     total_vendidos_promo = df_tienda.loc[df_tienda["onpromotion"] > 0, "sales"].sum()
 
     porcentaje_promo = (total_vendidos_promo / total_productos_vendidos * 100) if total_productos_vendidos > 0 else 0
@@ -266,8 +280,8 @@ elif seccion == "Por tienda":
 
     st.divider()
 
-    # a) Ventas por año (ordenadas)
-    st.subheader("Ventas totales por año")
+    # a) Ventas por año (ordenado de más antiguo a más reciente)
+    st.subheader("Ventas totales por año (de más antiguo a más reciente)")
 
     ventas_anio = (
         df_tienda.groupby("year", as_index=False)["sales"]
@@ -275,16 +289,20 @@ elif seccion == "Por tienda":
         .sort_values("year")
     )
 
-    chart_ventas_anio = (
-        alt.Chart(ventas_anio)
-        .mark_bar(color=COLOR_PRINCIPAL)
-        .encode(
-            x=alt.X("year:O", title="Año", sort="ascending"),
-            y=alt.Y("sales:Q", title="Ventas totales (unidades)")
-        )
-    )
+    if ventas_anio.empty:
+        st.info("No hay datos suficientes para esa tienda.")
+    else:
+        ventas_anio["year"] = ventas_anio["year"].astype(int)
 
-    st.altair_chart(chart_ventas_anio, use_container_width=True)
+        chart_ventas_anio = (
+            alt.Chart(ventas_anio)
+            .mark_bar(color=COLOR_PRINCIPAL)
+            .encode(
+                x=alt.X("year:O", title="Año", sort="ascending"),
+                y=alt.Y("sales:Q", title="Ventas totales (unidades)")
+            )
+        )
+        st.altair_chart(chart_ventas_anio, use_container_width=True)
 
 
 # ===============================
@@ -305,12 +323,11 @@ elif seccion == "Por estado":
 
     # Transacciones por año
     trans_anio = (
-        df_estado.groupby("year")["transactions"]
+        df_estado.groupby("year", as_index=False)["transactions"]
         .sum()
-        .sort_index()
-        .reset_index()
+        .sort_values("year")
     )
-    trans_anio.columns = ["Año", "Transacciones"]
+    trans_anio.rename(columns={"year": "Año", "transactions": "Transacciones"}, inplace=True)
 
     with c1:
         st.write("Transacciones por año")
@@ -326,16 +343,15 @@ elif seccion == "Por estado":
 
     # Top tiendas por ventas en ese estado
     top_tiendas_estado = (
-        df_estado.groupby("store_nbr")["sales"]
+        df_estado.groupby("store_nbr", as_index=False)["sales"]
         .sum()
-        .sort_values(ascending=False)
+        .sort_values("sales", ascending=False)
         .head(10)
-        .reset_index()
     )
-    top_tiendas_estado.columns = ["Tienda", "Ventas"]
+    top_tiendas_estado.rename(columns={"store_nbr": "Tienda", "sales": "Ventas"}, inplace=True)
 
     with c2:
-        st.write("Ranking de tiendas con mas ventas en el estado")
+        st.write("Top 10 tiendas por ventas en el estado")
         chart_top_tiendas = (
             alt.Chart(top_tiendas_estado)
             .mark_bar(color=COLOR_SECUNDARIO)
@@ -394,17 +410,16 @@ elif seccion == "Gráfico extra":
 
     tiendas_sel = st.multiselect(
         "Selecciona tiendas",
-        sorted(df["store_nbr"].unique()),
-        default=sorted(df["store_nbr"].unique())[:3]
+        sorted(df["store_nbr"].dropna().unique()),
+        default=sorted(df["store_nbr"].dropna().unique())[:3]
     )
 
     df_sel = df[df["store_nbr"].isin(tiendas_sel)].copy()
 
     if not df_sel.empty:
         ventas_diarias = (
-            df_sel.groupby(["date", "store_nbr"])["sales"]
+            df_sel.groupby(["date", "store_nbr"], as_index=False)["sales"]
             .sum()
-            .reset_index()
         )
 
         chart_lineas = (
@@ -424,5 +439,4 @@ elif seccion == "Gráfico extra":
     else:
         st.info("Selecciona al menos una tienda para ver la comparación.")
 
-# Ejecución: streamlit run tp_streamlit_ventas.py
-
+# Ejecución local: streamlit run tp_streamlit_ventas.py
