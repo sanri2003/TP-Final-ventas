@@ -3,9 +3,9 @@ import pandas as pd
 import altair as alt
 from pathlib import Path
 
-# =========================
+
 # CONFIGURACIÓN GENERAL
-# =========================
+
 st.set_page_config(
     page_title="Dashboard de Ventas",
     layout="wide",
@@ -21,9 +21,8 @@ COLOR_SECUNDARIO = "#1E8449"
 COLOR_TERCERO = "#27AE60"
 
 
-# =========================
-# CARGA DE DATOS (OPTIMIZADA)
-# =========================
+# CARGA DE DATOS 
+
 @st.cache_data(show_spinner="Cargando datos...")
 def load_data():
     """
@@ -33,13 +32,13 @@ def load_data():
     - Lee solo columnas necesarias para bajar RAM.
     - Fuerza tipos de dato y crea columnas temporales.
     """
-    # Columnas realmente usadas por el dashboard
+   
     usecols = [
         "date", "store_nbr", "family", "sales", "onpromotion",
         "state", "transactions"
     ]
 
-    # Tipos para ahorrar memoria (según tu screenshot + buenas prácticas)
+    # Tipos para ahorrar memoria 
     dtype_map = {
         "store_nbr": "int32",
         "family": "category",
@@ -69,7 +68,7 @@ def load_data():
         else:
             raise FileNotFoundError(f"No encontré {base_name}.csv.gz ni {base_name}.csv")
 
-        # Limpieza típica
+        
         if "Unnamed: 0" in df_part.columns:
             df_part = df_part.drop(columns=["Unnamed: 0"])
 
@@ -79,25 +78,24 @@ def load_data():
     df2 = read_part("parte_2")
     df = pd.concat([df1, df2], ignore_index=True)
 
-    # Asegurar columnas clave presentes
+    
     missing = [c for c in ["date", "store_nbr", "family", "sales"] if c not in df.columns]
     if missing:
         raise ValueError(f"Faltan columnas obligatorias en el dataset: {missing}")
 
-    # Parse date y crear columnas temporales (una vez)
+    
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
     df = df.dropna(subset=["date"])
 
-    # Tipos
+    
     for col, dt in dtype_map.items():
         if col in df.columns:
             try:
                 df[col] = df[col].astype(dt)
             except Exception:
-                # si por algún motivo no se puede castear, lo deja como viene
+               
                 pass
 
-    # Si no existe transactions, la creo en 0 (por seguridad)
     if "transactions" not in df.columns:
         df["transactions"] = 0.0
     df["transactions"] = df["transactions"].fillna(0).astype("float32")
@@ -106,7 +104,7 @@ def load_data():
     df["month"] = df["date"].dt.month.astype("int8")
     df["week"] = df["date"].dt.isocalendar().week.astype("int16")
 
-    # Día de semana (en inglés para ordenar, después lo mostramos en ES)
+    # Día de semana 
     df["day_of_week"] = df["date"].dt.day_name()
 
     return df
@@ -114,13 +112,11 @@ def load_data():
 
 df = load_data()
 
+# PRE-CÁLCULOS 
 
-# =========================
-# PRE-CÁLCULOS (CLAVE para NO CRASHEAR)
-# =========================
 @st.cache_data(show_spinner="Precalculando agregaciones...")
 def build_aggregates(df: pd.DataFrame):
-    # 1) Top productos
+    #Top productos
     ventas_por_producto_top10 = (
         df.groupby("family", observed=True)["sales"]
         .sum()
@@ -130,7 +126,7 @@ def build_aggregates(df: pd.DataFrame):
     )
     ventas_por_producto_top10.columns = ["Producto", "Ventas"]
 
-    # 2) Ventas por tienda (para distribución)
+    #Ventas por tienda 
     ventas_por_tienda = (
         df.groupby("store_nbr", observed=True)["sales"]
         .sum()
@@ -139,7 +135,7 @@ def build_aggregates(df: pd.DataFrame):
     )
     ventas_por_tienda.columns = ["Tienda", "Ventas"]
 
-    # 3) Top tiendas promo
+    #Top tiendas promo
     df_promo = df[df["onpromotion"] > 0]
     top_tiendas_promo = (
         df_promo.groupby("store_nbr", observed=True)["sales"]
@@ -150,7 +146,7 @@ def build_aggregates(df: pd.DataFrame):
     )
     top_tiendas_promo.columns = ["Tienda", "Ventas_en_promoción"]
 
-    # 4) Estacionalidad (promedios)
+    # Estacionalidad (promedios)
     orden_dias = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
     dias_es = {
         "Monday": "Lunes",
@@ -187,7 +183,7 @@ def build_aggregates(df: pd.DataFrame):
     )
     ventas_mes.columns = ["Mes", "Ventas_medias"]
 
-    # 5) Por tienda: ventas por año (para tab 2)
+    # Por tienda: ventas por año 
     tienda_anio = (
         df.groupby(["store_nbr", "year"], observed=True)["sales"]
         .sum()
@@ -195,7 +191,7 @@ def build_aggregates(df: pd.DataFrame):
         .sort_values(["store_nbr", "year"])
     )
 
-    # 6) Por estado: transacciones por año + top tiendas por estado + ventas por familia (para tab 3)
+    # Por estado: transacciones por año + top tiendas por estado + ventas por familia 
     estado_anio_trans = (
         df.groupby(["state", "year"], observed=True)["transactions"]
         .sum()
@@ -213,7 +209,7 @@ def build_aggregates(df: pd.DataFrame):
         .reset_index()
     )
 
-    # 7) Ventas diarias por tienda (para tab 4)
+    # Ventas diarias por tienda 
     ventas_diarias = (
         df.groupby(["date", "store_nbr"], observed=True)["sales"]
         .sum()
@@ -239,18 +235,17 @@ def build_aggregates(df: pd.DataFrame):
 agg = build_aggregates(df)
 
 
-# =========================
+
 # NAVEGACIÓN
-# =========================
+
 seccion = st.sidebar.radio(
     "Navegación",
     ["Visión global", "Por tienda", "Por estado", "Gráfico extra"]
 )
 
 
-# =========================
 # SECCIÓN 1 - VISIÓN GLOBAL
-# =========================
+
 if seccion == "Visión global":
     st.header("Visión global de las ventas")
 
@@ -260,7 +255,7 @@ if seccion == "Visión global":
         "junto con rankings de ventas y patrones de estacionalidad."
     )
 
-    # a) Conteo general
+    # Conteo general
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Número total de tiendas", int(df["store_nbr"].nunique()))
     col2.metric("Número total de productos que se venden", int(df["family"].nunique()))
@@ -269,7 +264,7 @@ if seccion == "Visión global":
 
     st.divider()
 
-    # b) Análisis en términos medios
+    #Análisis en términos medios
     st.subheader("Análisis en términos medios")
 
     c1, c2 = st.columns(2)
@@ -300,7 +295,7 @@ if seccion == "Visión global":
 
     st.divider()
 
-    # b iii) Top tiendas promo
+    #Top tiendas promo
     st.subheader("Ranking (Top 10) de tiendas con ventas en productos en promoción")
 
     chart_promo = (
@@ -315,7 +310,7 @@ if seccion == "Visión global":
 
     st.divider()
 
-    # c) Estacionalidad
+    # Estacionalidad
     st.subheader("Análisis de la estacionalidad de las ventas")
 
     est1, est2, est3 = st.columns(3)
@@ -357,14 +352,13 @@ if seccion == "Visión global":
         st.altair_chart(chart_mes, use_container_width=True)
 
 
-# =========================
 # SECCIÓN 2 - POR TIENDA
-# =========================
+
 elif seccion == "Por tienda":
     st.header("Rendimiento por tienda")
 
     tiendas = sorted(df["store_nbr"].unique().tolist())
-    # Guardar selección estable (evita bugs raros al rerun)
+    # Guardar selección estable 
     if "tienda_sel" not in st.session_state:
         st.session_state.tienda_sel = int(tiendas[0])
 
@@ -375,8 +369,8 @@ elif seccion == "Por tienda":
     )
     st.session_state.tienda_sel = int(tienda)
 
-    # KPIs por tienda (sin filtrar todo el DF gigante)
-    # Filtrar solo lo necesario para KPIs (es rápido), y el gráfico sale del agregado cacheado
+    # KPIs por tienda 
+    # Filtrar solo lo necesario para KPIs 
     df_tienda = df[df["store_nbr"] == tienda]
 
     total_productos_vendidos = float(df_tienda["sales"].sum())
@@ -406,9 +400,8 @@ elif seccion == "Por tienda":
     st.altair_chart(chart_ventas_anio, use_container_width=True)
 
 
-# =========================
 # SECCIÓN 3 - POR ESTADO
-# =========================
+
 elif seccion == "Por estado":
     st.header("Análisis por estado")
 
@@ -428,7 +421,7 @@ elif seccion == "Por estado":
 
         c1, c2 = st.columns(2)
 
-        # Transacciones por año (agregado)
+        # Transacciones por año 
         trans = agg["estado_anio_trans"][agg["estado_anio_trans"]["state"] == estado][["year", "transactions"]]
         trans = trans.rename(columns={"year": "Año", "transactions": "Transacciones"})
 
@@ -444,7 +437,7 @@ elif seccion == "Por estado":
             )
             st.altair_chart(chart_trans, use_container_width=True)
 
-        # Top tiendas por ventas en el estado (agregado)
+        # Top tiendas por ventas en el estado 
         top_tiendas = agg["estado_top_tiendas"][agg["estado_top_tiendas"]["state"] == estado]
         top_tiendas = (
             top_tiendas.sort_values("sales", ascending=False)
@@ -480,9 +473,7 @@ elif seccion == "Por estado":
             )
 
 
-# =========================
 # SECCIÓN 4 - GRÁFICO EXTRA
-# =========================
 elif seccion == "Gráfico extra":
     st.header("Comparación de la evolución de ventas entre tiendas")
 
@@ -503,7 +494,7 @@ elif seccion == "Gráfico extra":
     if not tiendas_sel:
         st.info("Selecciona al menos una tienda para ver la comparación.")
     else:
-        # Usamos el agregado cacheado (MUCHO más estable que agrupar cada vez)
+        # Usamos el agregado cacheado 
         ventas_diarias = agg["ventas_diarias"][agg["ventas_diarias"]["store_nbr"].isin(tiendas_sel)]
 
         chart_lineas = (
@@ -517,5 +508,4 @@ elif seccion == "Gráfico extra":
         )
         st.altair_chart(chart_lineas, use_container_width=True)
 
-# Ejecución local:
-# streamlit run tp_streamlit_ventas.py
+# Ejecución local: streamlit run tp_streamlit_ventas.py
